@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ADAK Chatbot</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #ece5dd;
+    }
+
+    .chat-container {
+      max-width: 600px;
+      margin: 0 auto;
+      background-color: #fff;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+
+    .header {
+      background-color: #075e54;
+      color: white;
+      padding: 15px;
+      font-weight: bold;
+      font-size: 20px;
+    }
+
+    .messages {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .message {
+      max-width: 75%;
+      margin-bottom: 10px;
+      padding: 10px 15px;
+      border-radius: 10px;
+      word-wrap: break-word;
+    }
+
+    .user {
+      align-self: flex-end;
+      background-color: #dcf8c6;
+    }
+
+    .bot {
+      align-self: flex-start;
+      background-color: #f1f0f0;
+    }
+
+    .input-area {
+      display: flex;
+      border-top: 1px solid #ddd;
+    }
+
+    #input {
+      flex: 1;
+      padding: 15px;
+      border: none;
+      font-size: 16px;
+    }
+
+    #send-btn {
+      background-color: #075e54;
+      color: white;
+      border: none;
+      padding: 15px 20px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    #send-btn:hover {
+      background-color: #0a6e65;
+    }
+  </style>
+</head>
+<body>
+  <div class="chat-container">
+    <div class="header">ADAK Chatbot</div>
+    <div class="messages" id="messages"></div>
+    <div class="input-area">
+      <input id="input" type="text" placeholder="Type a message..." autocomplete="off" />
+      <button id="send-btn" onclick="send()">Send</button>
+    </div>
+  </div>
+
+  <script>
+    async function send() {
+      const inputField = document.getElementById("input");
+      const messagesDiv = document.getElementById("messages");
+      const userText = inputField.value.trim();
+      if (!userText) return;
+
+      // Display user message
+      const userMsg = document.createElement("div");
+      userMsg.className = "message user";
+      userMsg.textContent = userText;
+      messagesDiv.appendChild(userMsg);
+
+      // Fetch response
+      const response = await fetch("/get", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ msg: userText })
+      });
+
+      const data = await response.json();
+
+      // Display bot response
+      const botMsg = document.createElement("div");
+      botMsg.className = "message bot";
+      botMsg.textContent = data.response;
+      messagesDiv.appendChild(botMsg);
+
+      // Clear input and scroll
+      inputField.value = "";
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    // Allow "Enter" key to send
+    document.getElementById("input").addEventListener("keypress", function(e) {
+      if (e.key === "Enter") {
+        send();
+      }
+    });
+  </script>
+</body>
+</html>

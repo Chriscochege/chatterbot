@@ -1,0 +1,138 @@
+from flask import Flask, render_template, request, jsonify
+from chatterbot import ChatBot
+from chatterbot.trainers import ListTrainer, ChatterBotCorpusTrainer
+import PyPDF2
+import os
+import nltk
+import openai
+from nltk.tokenize import sent_tokenize
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+
+# === Configuration ===
+openai.api_key = "your-openai-api-key-here"  # Replace with your API key
+nltk.download('punkt')
+
+app = Flask(__name__)
+
+# === 1. ChatterBot Setup ===
+bot = ChatBot(
+    "AntiDopingBot",
+    read_only=True,
+    logic_adapters=[{
+        "import_path": "chatterbot.logic.BestMatch",
+        "default_response": "Sorry, I cannot get you. Please visit https://adak.go.ke or call +254-20-2724208.",
+        "maximum_similarity_threshold": 0.9
+    }]
+)
+
+# === 2. Train ChatterBot ===
+list_trainer = ListTrainer(bot)
+list_trainer.train([
+    "hi", "Hi there! How can I help you?",
+    "what is doping", "Doping refers to the use of prohibited substances or methods to enhance performance.",
+    "report doping", "Visit https://adak.go.ke or call ADAK anonymously at +254-20-2724208.",
+    "banned substances", "Find the list on WADA's website: https://www.wada-ama.org/",
+    "adak contact", "Email: info@adak.go.ke or phone: +254-20-2724208.",
+    "testing process", "Testing includes sample collection, lab analysis, and result management.",
+    "athlete rights", "Athletes have the right to legal counsel, fair hearing, and privacy."
+])
+
+corpus_trainer = ChatterBotCorpusTrainer(bot)
+corpus_trainer.train("chatterbot.corpus.english")
+
+# === 3. Helper: Chunk Text ===
+def chunk_text(text, chunk_size=1000, overlap=200):
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        chunks.append(text[start:end])
+        start += chunk_size - overlap
+    return chunks
+
+# === 4. Extract and Chunk PDF ===
+def extract_pdf_chunks(path):
+    text = ""
+    if not os.path.exists(path):
+        print(f"[ERROR] PDF file not found: {path}")
+        return []
+
+    with open(path, "rb") as file:
+        reader = PyPDF2.PdfReader(file)
+        for page in reader.pages:
+            raw = page.extract_text()
+            if raw:
+                for line in raw.split("\n"):
+                    line = line.strip()
+                    if line.lower().startswith("page") or "http" in line or len(line) < 5:
+                        continue
+                    text += line + "\n"
+    return chunk_text(text)
+
+# === 5. Load PDF and Embeddings ===
+pdf_path = os.path.join("pdfs", "adak.pdf")
+pdf_chunks = extract_pdf_chunks(pdf_path)
+
+if pdf_chunks:
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    pdf_embeddings = model.encode(pdf_chunks)
+else:
+    model = None
+    pdf_embeddings = []
+
+# === 6. Semantic Search + GPT Summary ===
+def search_pdf(query, top_n=3):
+    if not model or not pdf_chunks:
+        return "ADAK document not loaded. Please check the PDF file."
+
+    query_embedding = model.encode([query])
+    similarity = cosine_similarity(query_embedding, pdf_embeddings)[0]
+    best_indices = similarity.argsort()[::-1][:top_n]
+
+    if similarity[best_indices[0]] < 0.4:
+        return "No relevant information found in the ADAK document."
+
+    relevant_text = "\n\n".join([pdf_chunks[i] for i in best_indices])
+
+    prompt = f"""You are a helpful assistant for ADAK (Anti-Doping Agency of Kenya). A user asked:
+
+"{query}"
+
+Based on the following ADAK document, provide a short, accurate, and plain-language answer:
+
+{relevant_text}
+
+Answer:"""
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"[OpenAI Error: {e}]"
+
+# === 7. Flask Routes ===
+@app.route("/")
+def home():
+    return render_template("index.html")
+
+@app.route("/get", methods=["POST"])
+def get_response():
+    user_input = request.json.get("msg", "")
+    pdf_reply = search_pdf(user_input)
+
+    if "No relevant information found" in pdf_reply or "not loaded" in pdf_reply or "OpenAI Error" in pdf_reply:
+        final_response = str(bot.get_response(user_input))
+    else:
+        final_response = pdf_reply
+
+    return jsonify({
+        "response": f"ADAK SUPPORT: {final_response}"
+    })
+
+# === 8. Run App ===
+if __name__ == "__main__":
+    app.run(debug=True)
